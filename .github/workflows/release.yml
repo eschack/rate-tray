@@ -36,10 +36,11 @@ jobs:
           "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Test
-        run: |
-          dotnet test tests/RateTray.Tests/RateTray.Tests.csproj --configuration Release
-          dotnet test tests/RateTray.E2E/RateTray.E2E.csproj --configuration Release
+      - name: Unit tests
+        run: dotnet test tests/RateTray.Tests/RateTray.Tests.csproj --configuration Release
+
+      - name: End-to-end tests
+        run: dotnet test tests/RateTray.E2E/RateTray.E2E.csproj --configuration Release
 
       # Framework-dependent: a self-contained build would be ~70 MB, and the .NET 9 Desktop
       # Runtime is already present on most machines that run either CLI.
