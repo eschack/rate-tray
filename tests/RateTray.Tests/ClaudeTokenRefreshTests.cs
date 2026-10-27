@@ -164,6 +164,29 @@ public class ClaudeTokenRefreshTests
     }
 
     [Fact]
+    public void Local_auth_check_rereads_credentials_without_contacting_the_provider()
+    {
+        using var credentials = new CredentialFile(expired: true);
+        using var client = Client(_ => throw new InvalidOperationException("Request should not be sent"));
+        var options = credentials.Options();
+        options.AutoRefreshToken = true;
+        var provider = new ClaudeUsageProvider(options, client);
+
+        var expired = provider.ReadLocalAuthStatus();
+        Assert.True(expired.Ok);
+        Assert.True(expired.Auth!.IsValid);
+        Assert.True(TrayApp.TokenExpired(expired.Auth, DateTimeOffset.UtcNow));
+
+        var root = credentials.Read();
+        root["claudeAiOauth"]!["expiresAt"] = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeMilliseconds();
+        File.WriteAllText(credentials.Path, root.ToJsonString());
+
+        var renewed = provider.ReadLocalAuthStatus();
+        Assert.True(renewed.Ok);
+        Assert.False(TrayApp.TokenExpired(renewed.Auth, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public async Task Refresh_uses_the_existing_refresh_token_when_the_response_does_not_rotate_it()
     {
         using var credentials = new CredentialFile();

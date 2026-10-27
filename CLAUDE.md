@@ -75,7 +75,8 @@ found. Adding a hardcoded default list is the wrong fix for "limit X is missing"
 **Failures degrade, they do not blank the display.** A failed poll reuses the last good
 readings (`RememberAndRestore`) and `PollScheduler` decides when that provider may be tried
 again. `UsageCache` persists the last good readings to `cache.json` so a restart paints numbers
-before the first poll returns.
+before the first poll returns. An expired Claude access token is an exception for tray icons:
+they show `??` until renewal, while cached readings remain available in the details window.
 
 `PollScheduler` is a separate, unit-tested class for a reason: **only cycles that actually
 reached a provider may be recorded as failures.** An earlier version ran the skipped cycles

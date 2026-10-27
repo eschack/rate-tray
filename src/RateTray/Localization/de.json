@@ -116,6 +116,7 @@
   "error.claude.insecureUrl": "Endpunkt ist nicht https, kein Token gesendet: {0}",
   "error.claude.unreadable": "Anmeldedaten unlesbar: {0}",
   "error.claude.expired": "Token abgelaufen — Claude Code starten (oder autoRefreshToken aktivieren)",
+  "error.claude.expiredDisplay": "Token abgelaufen — Claude Code starten oder auf Erneuerung warten",
   "error.claude.refreshNoToken": "Token-Refresh fehlgeschlagen: kein Refresh-Token — bei Claude Code anmelden",
   "error.claude.refreshHttp": "Token-Refresh fehlgeschlagen: HTTP {0} — falls nötig bei Claude Code anmelden",
   "error.claude.refreshInvalid": "Token-Refresh fehlgeschlagen: ungültige Antwort — falls nötig bei Claude Code anmelden",

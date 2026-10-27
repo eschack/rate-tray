@@ -26,6 +26,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly Palette _palette;
     private readonly List<IUsageProvider> _providers;
     private readonly System.Windows.Forms.Timer _timer = new();
+    private readonly System.Windows.Forms.Timer _authTimer = new();
     private readonly System.Windows.Forms.Timer _tooltipTimer = new();
     private readonly Dictionary<string, TrayIcon> _icons = [];
     private readonly ContextMenuStrip _menu = new();
@@ -51,6 +52,8 @@ public sealed class TrayApp : ApplicationContext
     private Dictionary<string, LimitReading> _lastReadings = [];
     private DateTimeOffset? _lastUpdate;
     private bool _refreshing;
+    private bool _claudeTokenExpired;
+    private AuthStatus? _claudeLocalAuth;
 
     /// <summary>When the timer fires next, drawn as the countdown strip in the details window.</summary>
     private DateTimeOffset _nextPoll;
@@ -87,6 +90,12 @@ public sealed class TrayApp : ApplicationContext
         _lastGood = UsageCache.Load();
         _schedule = new PollScheduler(_config.MaxBackoffMinutes);
         ApplyPollSpacing();
+        _authTimer.Tick += (_, _) =>
+        {
+            SyncIcons();
+            HideTooltip();
+            if (_details is { Visible: true }) _details.ShowNearTray(DisplayResults(), _lastUpdate, _nextPoll);
+        };
 
         BuildMenu();
         _menu.Opened += (_, _) => HideTooltip();
@@ -160,7 +169,7 @@ public sealed class TrayApp : ApplicationContext
             RaiseNotifications();
             RefreshIconsMenu();
 
-            if (_details is { Visible: true }) _details.ShowNearTray(_lastResults, _lastUpdate, _nextPoll);
+            if (_details is { Visible: true }) _details.ShowNearTray(DisplayResults(), _lastUpdate, _nextPoll);
         }
         catch (OperationCanceledException)
         {
@@ -281,15 +290,20 @@ public sealed class TrayApp : ApplicationContext
     private void SyncIcons()
     {
         var wanted = new List<string>();
+        UpdateClaudeTokenState();
 
         foreach (var id in _config.Icons)
         {
             var reading = _lastReadings.GetValueOrDefault(id);
-            var error = reading is null ? ErrorForId(id) : null;
+            var tokenExpired = IsExpiredClaudeIcon(id, _claudeTokenExpired);
+            var displayedReading = tokenExpired ? null : reading;
+            var error = tokenExpired
+                ? Loc.T("error.claude.expiredDisplay")
+                : reading is null ? ErrorForId(id) : null;
 
             // A configured id that simply doesn't exist for this account (and whose provider
             // answered fine) is dropped rather than shown as a permanent "?".
-            if (reading is null && error is null)
+            if (displayedReading is null && error is null)
             {
                 RemoveIcon(id);
                 continue;
@@ -299,22 +313,66 @@ public sealed class TrayApp : ApplicationContext
             var icon = _icons.TryGetValue(id, out var existing) ? existing : CreateIcon(id);
 
             var dark = TrayIconRenderer.UsesDarkTaskbar(_config.Theme);
-            var color = reading is null
+            var color = displayedReading is null
                 ? Harmony.Legible(_palette.Unknown, dark)
-                : _palette.ForReading(reading.Group, reading.Percent, reading.Variant, reading.VariantCount, dark);
+                : _palette.ForReading(displayedReading.Group, displayedReading.Percent,
+                    displayedReading.Variant, displayedReading.VariantCount, dark);
 
             var previous = icon.Icon;
-            icon.Icon = TrayIconRenderer.Render(reading?.IconText ?? "?", color, _config.FontFamily);
+            icon.Icon = TrayIconRenderer.Render(IconTextFor(reading, tokenExpired), color, _config.FontFamily);
             previous?.Dispose();
 
             // With the hover card active the native tooltip must stay empty, or Windows
             // would show its own text balloon alongside it.
-            icon.Text = _config.RichTooltips ? string.Empty : Tooltip(id, reading, error);
+            icon.Text = _config.RichTooltips ? string.Empty : Tooltip(id, displayedReading, error);
             icon.Visible = true;
         }
 
         foreach (var stale in _icons.Keys.Except(wanted, StringComparer.OrdinalIgnoreCase).ToList())
             RemoveIcon(stale);
+    }
+
+    private void UpdateClaudeTokenState()
+    {
+        _authTimer.Stop();
+        var provider = _providers.OfType<ClaudeUsageProvider>().FirstOrDefault(p => p.Enabled);
+        var local = provider?.ReadLocalAuthStatus();
+        var auth = local?.Auth ?? _lastResults.FirstOrDefault(r => r.Group == "Claude")?.Auth;
+        var now = DateTimeOffset.UtcNow;
+        _claudeLocalAuth = auth;
+        _claudeTokenExpired = provider is not null && TokenExpired(auth, now);
+
+        if (provider is null || TokenExpiryDelay(auth, now) is not { } delay) return;
+
+        _authTimer.Interval = delay;
+        _authTimer.Start();
+    }
+
+    internal static bool TokenExpired(AuthStatus? auth, DateTimeOffset now) =>
+        auth?.ExpiresAt is { } expiry && expiry <= now;
+
+    internal static int? TokenExpiryDelay(AuthStatus? auth, DateTimeOffset now)
+    {
+        if (auth?.ExpiresAt is not { } expiry || expiry <= now) return null;
+        return (int)Math.Clamp(Math.Ceiling((expiry - now).TotalMilliseconds), 1, int.MaxValue);
+    }
+
+    internal static bool IsExpiredClaudeIcon(string id, bool tokenExpired) =>
+        tokenExpired && GroupOf(id) == "Claude";
+
+    internal static string IconTextFor(LimitReading? reading, bool tokenExpired) =>
+        tokenExpired ? "??" : reading?.IconText ?? "?";
+
+    private IReadOnlyList<ProviderResult> DisplayResults() =>
+        _lastResults.Select(result => DisplayResult(result, _claudeTokenExpired, _claudeLocalAuth)).ToList();
+
+    internal static ProviderResult DisplayResult(ProviderResult result, bool tokenExpired, AuthStatus? localAuth)
+    {
+        if (!tokenExpired || !result.Group.Equals("Claude", StringComparison.OrdinalIgnoreCase)) return result;
+
+        var error = Loc.T("error.claude.expiredDisplay");
+        if (result.Error is { Length: > 0 } previous) error += " · " + previous;
+        return result with { Auth = localAuth ?? result.Auth, Error = error };
     }
 
     private TrayIcon CreateIcon(string id)
@@ -399,7 +457,10 @@ public sealed class TrayApp : ApplicationContext
 
         _hoveredId = id;
         _tooltip ??= new TooltipWindow(_config, _palette);
-        _tooltip.ShowFor(_lastReadings.GetValueOrDefault(id), GroupOf(id), ErrorForId(id), pos);
+        var group = GroupOf(id);
+        var tokenExpired = IsExpiredClaudeIcon(id, _claudeTokenExpired);
+        _tooltip.ShowFor(tokenExpired ? null : _lastReadings.GetValueOrDefault(id), group,
+            tokenExpired ? Loc.T("error.claude.expiredDisplay") : ErrorForId(id), pos);
     }
 
     /// <summary>
@@ -448,6 +509,8 @@ public sealed class TrayApp : ApplicationContext
 
         foreach (var reading in _lastReadings.Values)
         {
+            if (IsExpiredClaudeIcon(reading.Id, _claudeTokenExpired)) continue;
+
             // Keying on the reset timestamp makes the warning repeat in the next window.
             var key = $"{reading.Id}@{reading.ResetsAt?.ToUnixTimeSeconds() ?? 0}";
 
@@ -714,7 +777,7 @@ public sealed class TrayApp : ApplicationContext
         // itself a few milliseconds ago — that same click therefore means "close", not "reopen".
         if ((DateTime.UtcNow - _details.LastAutoHidden).TotalMilliseconds < 250) return;
 
-        _details.ShowNearTray(_lastResults, _lastUpdate, _nextPoll);
+        _details.ShowNearTray(DisplayResults(), _lastUpdate, _nextPoll);
     }
 
     // --------------------------------------------------------------- shutdown
@@ -722,6 +785,7 @@ public sealed class TrayApp : ApplicationContext
     private void Quit()
     {
         _timer.Stop();
+        _authTimer.Stop();
         _tooltipTimer.Stop();
         _shutdown.Cancel();
 
@@ -738,6 +802,7 @@ public sealed class TrayApp : ApplicationContext
         if (disposing)
         {
             _timer.Dispose();
+            _authTimer.Dispose();
             _tooltipTimer.Dispose();
             _menu.Dispose();
             _shutdown.Dispose();

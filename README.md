@@ -139,6 +139,8 @@ dark taskbar.
 
 A failed poll does not blank the tray. The last readings that arrived stay on screen with the
 error shown next to them, and that provider is backed off exponentially — capped at 15 minutes.
+If the Claude access token expires, its tray icons show `??` instead of cached percentages until
+the token is renewed. Cached readings are retained in the details panel.
 If the server states a `Retry-After`, that wins over the guess, and the details panel says how
 long the pause still has to run. A rate limit goes straight to the longest pause instead of
 climbing to it: a spent quota is not something retrying makes better. *Refresh now* in the menu clears the backoff.

@@ -148,6 +148,9 @@ Ratenlimit bekommt sofort die volle Pause statt sich dorthin hochzuarbeiten — 
 aufgebrauchtes Kontingent wird durch Nachfragen nicht besser.
 *Jetzt aktualisieren* im Menü hebt sie auf.
 
+Läuft Claudes Zugriffstoken ab, zeigen dessen Tray-Icons bis zur Erneuerung `??` statt
+zwischengespeicherter Prozente. Die gespeicherten Werte bleiben im Detail-Fenster erhalten.
+
 Intervall, Backoff-Obergrenze und die Anfrage-Timeouts beider Dienste stehen im
 Einstellungsdialog. Optionen, die eine neuere Version mitbringt, werden beim nächsten Start in
 eine bestehende `settings.json` geschrieben — die Datei zeigt also immer alles Einstellbare.

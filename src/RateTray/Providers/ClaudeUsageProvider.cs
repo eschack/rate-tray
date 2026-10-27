@@ -46,6 +46,14 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
 
     internal Task<ProviderResult> RefreshTokenAsync(CancellationToken ct) => PollAsync(ct, refreshOnly: true);
 
+    internal ProviderResult ReadLocalAuthStatus()
+    {
+        var (creds, failure) = LoadCredentials();
+        return creds is null
+            ? failure!
+            : ProviderResult.Success(Group, []) with { Auth = AuthFrom(creds) };
+    }
+
     /// <summary>
     /// Names a configured endpoint that is not the shipped one, so the choice stays visible
     /// wherever the result is shown. The token URL only counts while the refresh can actually
@@ -65,23 +73,8 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
 
     private async Task<ProviderResult> PollAsync(CancellationToken ct, bool refreshOnly)
     {
-        Credentials creds;
-        try
-        {
-            creds = ReadCredentials();
-        }
-        catch (FileNotFoundException)
-        {
-            return ProviderResult.Failed(Group, Loc.T("error.claude.noCredentials")) with
-            {
-                Auth = new AuthStatus { Group = Group, IsValid = false, Detail = Loc.T("auth.notLoggedIn") },
-            };
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                                      or JsonException or InvalidDataException or InvalidOperationException)
-        {
-            return ProviderResult.Failed(Group, Loc.T("error.claude.unreadable", ex.Message));
-        }
+        var (creds, failure) = LoadCredentials();
+        if (creds is null) return failure!;
 
         var auth = AuthFrom(creds);
 
@@ -165,6 +158,26 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
         catch (Exception ex)
         {
             return ProviderResult.Failed(Group, Loc.T("error.fetchFailed", ex.Message)) with { Auth = auth };
+        }
+    }
+
+    private (Credentials? Credentials, ProviderResult? Failure) LoadCredentials()
+    {
+        try
+        {
+            return (ReadCredentials(), null);
+        }
+        catch (FileNotFoundException)
+        {
+            return (null, ProviderResult.Failed(Group, Loc.T("error.claude.noCredentials")) with
+            {
+                Auth = new AuthStatus { Group = Group, IsValid = false, Detail = Loc.T("auth.notLoggedIn") },
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                      or JsonException or InvalidDataException or InvalidOperationException)
+        {
+            return (null, ProviderResult.Failed(Group, Loc.T("error.claude.unreadable", ex.Message)));
         }
     }
 

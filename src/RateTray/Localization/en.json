@@ -116,6 +116,7 @@
   "error.claude.insecureUrl": "Endpoint is not https, no token sent: {0}",
   "error.claude.unreadable": "Credentials unreadable: {0}",
   "error.claude.expired": "Token expired — start Claude Code (or enable autoRefreshToken)",
+  "error.claude.expiredDisplay": "Token expired — start Claude Code or wait for refresh",
   "error.claude.refreshNoToken": "Token refresh failed: no refresh token — sign in to Claude Code",
   "error.claude.refreshHttp": "Token refresh failed: HTTP {0} — sign in to Claude Code if needed",
   "error.claude.refreshInvalid": "Token refresh failed: invalid response — sign in to Claude Code if needed",
