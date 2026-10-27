@@ -49,7 +49,7 @@ public class ClaudeTokenRefreshTests
     [Fact]
     public async Task Automatic_refresh_uses_the_same_exchange_before_polling_usage()
     {
-        using var credentials = new CredentialFile(expired: true);
+        using var credentials = new CredentialFile(expired: true, subscriptionType: "enterprise");
         var requests = 0;
         using var client = Client(async request =>
         {
@@ -64,7 +64,7 @@ public class ClaudeTokenRefreshTests
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             Assert.Equal("new-access", request.Headers.Authorization.Parameter);
-            return JsonResponse("""{"limits":[]}""");
+            return JsonResponse("""{"limits":[],"extra_usage":{"is_enabled":true,"utilization":77}}""");
         });
         var options = credentials.Options();
         options.AutoRefreshToken = true;
@@ -73,7 +73,25 @@ public class ClaudeTokenRefreshTests
 
         Assert.True(result.Ok, result.Error);
         Assert.Equal(2, requests);
+        Assert.Equal("Spend limit", Assert.Single(result.Readings).Label);
+        Assert.Equal("OAuth · enterprise", result.Auth!.Detail);
         Assert.Equal("new-refresh", (string?)credentials.Read()["claudeAiOauth"]!["refreshToken"]);
+    }
+
+    [Fact]
+    public async Task Poll_uses_the_subscription_from_credentials_to_label_extra_usage()
+    {
+        using var credentials = new CredentialFile(subscriptionType: "enterprise");
+        using var client = Client(_ => Task.FromResult(JsonResponse(
+            """{"limits":[],"extra_usage":{"is_enabled":true,"utilization":77}}""")));
+
+        var result = await new ClaudeUsageProvider(credentials.Options(), client).ReadAsync(CancellationToken.None);
+
+        Assert.True(result.Ok, result.Error);
+        var reading = Assert.Single(result.Readings);
+        Assert.Equal("claude.extra_usage", reading.Id);
+        Assert.Equal("Spend limit", reading.Label);
+        Assert.Equal(77, reading.Percent);
     }
 
     [Fact]
@@ -173,7 +191,7 @@ public class ClaudeTokenRefreshTests
     {
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"ratetray-{Guid.NewGuid():N}.json");
 
-        public CredentialFile(bool expired = false, bool withRefreshToken = true)
+        public CredentialFile(bool expired = false, bool withRefreshToken = true, string subscriptionType = "test-plan")
         {
             var expires = DateTimeOffset.UtcNow.AddHours(expired ? -1 : 2).ToUnixTimeMilliseconds();
             var root = new JsonObject
@@ -184,7 +202,7 @@ public class ClaudeTokenRefreshTests
                     ["accessToken"] = "old-access",
                     ["refreshToken"] = withRefreshToken ? "old-refresh" : null,
                     ["expiresAt"] = expires,
-                    ["subscriptionType"] = "test-plan",
+                    ["subscriptionType"] = subscriptionType,
                 },
             };
             File.WriteAllText(Path, root.ToJsonString());

@@ -65,6 +65,20 @@ public class ClaudeUsageProviderTests
         Assert.DoesNotContain(ClaudeUsageProvider.Parse(withoutCredits), r => r.Id == "claude.extra_usage");
     }
 
+    [Theory]
+    [InlineData("enterprise", "Spend limit")]
+    [InlineData("ENTERPRISE", "Spend limit")]
+    [InlineData("pro", "Extra credit")]
+    [InlineData(null, "Extra credit")]
+    public void Parse_labels_extra_usage_for_the_subscription(string? subscriptionType, string expectedLabel)
+    {
+        var reading = ClaudeUsageProvider.Parse(Payload, subscriptionType)
+            .Single(r => r.Id == "claude.extra_usage");
+
+        Assert.Equal(expectedLabel, reading.Label);
+        Assert.Equal(25, reading.Percent);
+    }
+
     [Fact]
     public void Parse_keeps_an_unknown_kind_visible_instead_of_dropping_it()
     {

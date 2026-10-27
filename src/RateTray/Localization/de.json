@@ -106,6 +106,7 @@
   "label.claude.weeklyScoped": "Woche · {0}",
   "label.claude.weeklyModel": "Woche · Modell",
   "label.claude.extraUsage": "Extra-Guthaben",
+  "label.claude.spendLimit": "Ausgabenlimit",
   "note.claude.extraCurrency": "Limit in {0}",
   "label.codex.window": "Codex · {0}",
   "label.codex.windowNamed": "{0} · {1}",

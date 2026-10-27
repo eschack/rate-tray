@@ -151,7 +151,7 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
                 return ProviderResult.Failed(Group, Loc.T("error.claude.http", (int)response.StatusCode)) with { Auth = auth };
 
             var json = await response.Content.ReadAsStringAsync(deadline.Token).ConfigureAwait(false);
-            return ProviderResult.Success(Group, Parse(json)) with { Auth = auth };
+            return ProviderResult.Success(Group, Parse(json, creds.SubscriptionType)) with { Auth = auth };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -204,7 +204,7 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
     /// Builds readings from the <c>limits</c> array, which already carries every window the
     /// account has (session, weekly, per-model). Extra-usage credits are appended when enabled.
     /// </summary>
-    internal static List<LimitReading> Parse(string json)
+    internal static List<LimitReading> Parse(string json, string? subscriptionType = null)
     {
         var readings = new List<LimitReading>();
         var root = JsonNode.Parse(json)?.AsObject();
@@ -247,7 +247,9 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
             readings.Add(new LimitReading
             {
                 Id = "claude.extra_usage",
-                Label = Loc.T("label.claude.extraUsage"),
+                Label = Loc.T(string.Equals(subscriptionType?.Trim(), "enterprise", StringComparison.OrdinalIgnoreCase)
+                    ? "label.claude.spendLimit"
+                    : "label.claude.extraUsage"),
                 Group = "Claude",
                 Percent = ReadNumber(extra["utilization"]) ?? 0,
                 Note = currency is null ? null : Loc.T("note.claude.extraCurrency", currency),
