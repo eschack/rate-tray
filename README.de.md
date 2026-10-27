@@ -163,8 +163,9 @@ Das Detail-Fenster zeigt pro Dienst, wie lange die Anmeldung noch gültig ist.
 - **Claude** — Der Zugriffstoken hält wenige Stunden. Solange Claude Code läuft, erneuert es ihn
   auf der Platte und der Tray liest ihn nur neu. Ist er abgelaufen, sagt der Tray das.
   `claude.autoRefreshToken` lässt den Tray den Refresh selbst durchführen; die Option ist
-  **standardmäßig aus**, weil dieser Pfad nicht gegen den echten Endpunkt erprobt ist.
-  Schlägt er fehl, erscheint der Hinweis auf Claude Code und die Anmeldedatei bleibt unberührt.
+  **standardmäßig aus**, weil Refresh-Token rotieren können. Der Austausch wurde gegen den
+  echten Endpunkt getestet; der automatische Refresh bei Ablauf und konkurrierende Refreshes
+  mit Claude Code dagegen nicht.
 - **Codex** — Der Zugriffstoken gilt rund zehn Tage. Danach `codex login` ausführen.
 
 ## Diagnose
@@ -181,6 +182,22 @@ Start-Process .\RateTray.exe -ArgumentList "--once" -Wait -NoNewWindow `
 
 `--once` gibt immer Englisch aus, unabhängig von der eingestellten Sprache — so lässt sich die
 Ausgabe unverändert in ein Issue einfügen.
+
+Um Claudes Token ohne Abwarten des Ablaufs zu erneuern, zuerst RateTray und Claude Code beenden
+und dann ausführen:
+
+```powershell
+Start-Process .\RateTray.exe -ArgumentList "--refresh-claude-token" -Wait -NoNewWindow `
+  -RedirectStandardOutput refresh-output.txt ; Get-Content refresh-output.txt
+```
+
+Der Befehl tauscht den Token tatsächlich aus, auch wenn `autoRefreshToken` aus ist, und
+aktualisiert die Anmeldedaten von Claude Code. Er verweigert die Ausführung, solange RateTray
+läuft; auch Claude Code sollte beendet sein, damit keine konkurrierenden Refreshes stattfinden.
+Der Server kann den Refresh-Token selbst bei einem Fehler erneuern, sodass eventuell eine
+erneute Anmeldung nötig ist. Die Ausgabe enthält keine Token; mit `--once` lässt sich danach
+prüfen, ob der neue Zugriffstoken die Nutzung abrufen kann. Der Befehl aktiviert den
+automatischen Refresh nicht.
 
 ## Entwicklung
 

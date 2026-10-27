@@ -158,10 +158,10 @@ matters — and the details window renders it per service.
   reading it would report a permanently expired login.
 
 `claude.autoRefreshToken` is **off by default**: while Claude Code runs it keeps the token
-fresh and the tray just re-reads it. That refresh path (`tokenUrl` + `clientId` in
-settings.json) has not been exercised against the live endpoint — both are configurable so a
-wrong value can be fixed without a rebuild, and failure degrades to "start Claude Code" rather
-than touching the credentials file.
+fresh and the tray just re-reads it. An on-demand refresh and subsequent usage request succeeded
+against the live endpoint, but automatic refresh at expiry and concurrent refreshes with Claude
+Code have not been verified. The `tokenUrl` and `clientId` remain configurable so they can be
+corrected without a rebuild.
 
 **Credentials only travel over https.** `Endpoint.IsSecure` refuses anything else before the
 request is made, loopback excepted so a local mock stays possible — and the whole poll, token

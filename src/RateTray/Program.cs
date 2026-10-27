@@ -6,9 +6,24 @@ namespace RateTray;
 
 internal static class Program
 {
+    private const string SingleInstanceMutex = @"Local\RateTray.SingleInstance";
+
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--refresh-claude-token", StringComparer.OrdinalIgnoreCase))
+        {
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            using var refreshLock = new Mutex(initiallyOwned: true, SingleInstanceMutex, out var available);
+            if (!available)
+            {
+                Console.WriteLine("ERROR: Exit RateTray before refreshing the Claude token.");
+                return 1;
+            }
+
+            return RefreshClaudeToken().GetAwaiter().GetResult();
+        }
+
         // Diagnostics: `RateTray.exe --once > out.txt` polls both providers, prints every
         // limit id the account exposes (the ids you put in settings.json) and exits.
         if (args.Contains("--once", StringComparer.OrdinalIgnoreCase))
@@ -29,7 +44,7 @@ internal static class Program
         }
 
         // A second instance would add duplicate tray icons for the same limits.
-        using var single = new Mutex(initiallyOwned: true, @"Local\RateTray.SingleInstance", out var isFirst);
+        using var single = new Mutex(initiallyOwned: true, SingleInstanceMutex, out var isFirst);
         if (!isFirst) return 0;
 
         ApplicationConfiguration.Initialize();
@@ -136,6 +151,28 @@ internal static class Program
         }
 
         return failed ? 1 : 0;
+    }
+
+    private static async Task<int> RefreshClaudeToken()
+    {
+        Localization.Loc.Use("en");
+        var config = ConfigStore.Load();
+        if (Uri.TryCreate(config.Claude.TokenUrl, UriKind.Absolute, out var tokenEndpoint))
+            Console.WriteLine($"Token endpoint: {tokenEndpoint.Host}");
+
+        var result = await new ClaudeUsageProvider(config.Claude)
+            .RefreshTokenAsync(CancellationToken.None).ConfigureAwait(false);
+        if (!result.Ok)
+        {
+            Console.WriteLine($"ERROR: {result.Error}");
+            Console.WriteLine("The server may have rotated the refresh token; sign in to Claude Code again if needed.");
+            return 1;
+        }
+
+        Console.WriteLine("Claude token refreshed and credentials updated.");
+        if (result.Auth?.ExpiresAt is { } expiresAt)
+            Console.WriteLine($"Access token expires: {expiresAt.ToLocalTime():O}");
+        return 0;
     }
 
     private static void ReportFatal(Exception? exception)

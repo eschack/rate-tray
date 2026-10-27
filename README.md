@@ -158,8 +158,8 @@ The details panel shows how long each sign-in is still valid.
 - **Claude** — the access token lasts a few hours. While Claude Code is running it refreshes
   the token on disk and the tray simply re-reads it. If it has lapsed, the tray says so.
   `claude.autoRefreshToken` lets the tray perform the refresh itself; it is **off by default**
-  because that path has not been exercised against the live endpoint. On failure it degrades to
-  the "start Claude Code" hint and leaves the credentials file untouched.
+  because refresh tokens can rotate. The exchange has been tested against the live endpoint;
+  automatic refresh at expiry and concurrent refreshes with Claude Code have not.
 - **Codex** — the access token lasts about ten days. After that, run `codex login`.
 
 ## Diagnostics
@@ -176,6 +176,21 @@ Start-Process .\RateTray.exe -ArgumentList "--once" -Wait -NoNewWindow `
 
 `--once` always prints English, whatever language is configured, so its output can be pasted
 into an issue as-is.
+
+To refresh Claude's token on demand without waiting for expiry, first exit RateTray and Claude
+Code, then run:
+
+```powershell
+Start-Process .\RateTray.exe -ArgumentList "--refresh-claude-token" -Wait -NoNewWindow `
+  -RedirectStandardOutput refresh-output.txt ; Get-Content refresh-output.txt
+```
+
+This performs a real token exchange even when `autoRefreshToken` is off and updates Claude
+Code's credentials. The command refuses to run while RateTray is running; close Claude Code
+too, to avoid competing refreshes. The server may rotate the refresh token even if the command
+fails, so you may need to sign in again. It reports success or an error without printing tokens;
+use `--once` afterwards to check whether the updated access token can fetch usage. This does not
+enable automatic refresh.
 
 ## Development
 

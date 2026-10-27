@@ -8,7 +8,7 @@ It reads credentials, so it is fair to want to know exactly what it does with th
 
 | Path | Why | Written? |
 |---|---|---|
-| `%USERPROFILE%\.claude\.credentials.json` | OAuth access token for the usage request | Only when `claude.autoRefreshToken` is enabled — see below |
+| `%USERPROFILE%\.claude\.credentials.json` | OAuth access token for the usage request | When `claude.autoRefreshToken` is enabled or a manual token refresh is requested — see below |
 | `%USERPROFILE%\.codex\auth.json` | `exp` claim of the access token, to report sign-in validity | Never |
 | `%APPDATA%\RateTray\settings.json` | This app's own configuration | Yes |
 | `%APPDATA%\RateTray\cache.json` | Last readings, so a restart shows numbers at once | Yes |
@@ -22,8 +22,9 @@ or to its diagnostic output.
 
 **Network**
 
-One destination as shipped: `https://api.anthropic.com/api/oauth/usage`, and only when Claude is
-enabled. That is where the Claude token goes, and nowhere else.
+The usage request goes to `https://api.anthropic.com/api/oauth/usage`, and only when Claude is
+enabled. A token refresh goes to `https://console.anthropic.com/v1/oauth/token`, as described
+below.
 
 It is a setting rather than a constant, though, as is `claude.tokenUrl` for the refresh described
 below — both so a changed endpoint can be corrected without a rebuild. So the honest version of
@@ -56,15 +57,17 @@ request on demand. Both use a fixed address, not a setting.
 ## `autoRefreshToken`
 
 Off by default. When enabled, the app refreshes the Claude OAuth token itself and writes the
-result back into `.credentials.json`.
+result back into `.credentials.json`. The explicit `--refresh-claude-token` diagnostic performs
+that exchange regardless of this setting; see the README for precautions and usage.
 
 Two things to know before turning it on:
 
-1. **The refresh path has not been exercised against the live endpoint.** The token URL and
-   client id are configurable precisely so a wrong value can be corrected without a rebuild.
-2. Refresh tokens usually rotate. A failed refresh could in principle leave you needing to sign
-   in again. The write is atomic and preserves every other field in the file, and any failure
-   falls back to "start Claude Code" without modifying anything — but off is still the safer
+1. The on-demand exchange has been exercised against the live endpoint and the resulting
+   access token successfully used. Automatic refresh at expiry and concurrent refreshes with
+   Claude Code have not been verified. The token URL and client id remain configurable.
+2. Refresh tokens usually rotate. A failure after the server accepts the exchange could leave
+   you needing to sign in again, even if the local credentials were not updated. The write uses
+   an atomic replacement and preserves the other fields in the file. Off is still the safer
    default, and Claude Code keeps the token fresh on its own while it runs.
 
 ## Reporting a vulnerability

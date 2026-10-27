@@ -24,6 +24,9 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
     /// pass that token — one that only carries the shutdown token can hang indefinitely.
     /// </summary>
     private static readonly HttpClient Http = new() { Timeout = Timeout.InfiniteTimeSpan };
+    private readonly HttpClient _http = Http;
+
+    internal ClaudeUsageProvider(ClaudeOptions options, HttpClient http) : this(options) => _http = http;
 
     public string Group => "Claude";
 
@@ -37,9 +40,11 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
 
     public async Task<ProviderResult> ReadAsync(CancellationToken ct)
     {
-        var result = await PollAsync(ct).ConfigureAwait(false);
+        var result = await PollAsync(ct, refreshOnly: false).ConfigureAwait(false);
         return EndpointNotice() is { } notice ? result with { Notice = notice } : result;
     }
+
+    internal Task<ProviderResult> RefreshTokenAsync(CancellationToken ct) => PollAsync(ct, refreshOnly: true);
 
     /// <summary>
     /// Names a configured endpoint that is not the shipped one, so the choice stays visible
@@ -58,7 +63,7 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
         return named.Count == 0 ? null : Loc.T("note.endpoint", string.Join(", ", named));
     }
 
-    private async Task<ProviderResult> PollAsync(CancellationToken ct)
+    private async Task<ProviderResult> PollAsync(CancellationToken ct, bool refreshOnly)
     {
         Credentials creds;
         try
@@ -83,7 +88,7 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
         // Checked before the token is anywhere near a socket: over plain http it would be on
         // the wire in clear, and a poll that fails loudly is the only way a typo in a URL that
         // carries a credential becomes visible at all.
-        if (!Endpoint.IsSecure(options.UsageUrl))
+        if (!refreshOnly && !Endpoint.IsSecure(options.UsageUrl))
             return ProviderResult.Failed(Group, Loc.T("error.claude.insecureUrl", options.UsageUrl)) with { Auth = auth };
 
         // One deadline for the whole poll, refresh included. The shared client has no timeout of
@@ -95,9 +100,9 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
 
         try
         {
-            if (creds.IsExpired)
+            if (refreshOnly || creds.IsExpired)
             {
-                if (!options.AutoRefreshToken)
+                if (!refreshOnly && !options.AutoRefreshToken)
                     return ProviderResult.Failed(Group, Loc.T("error.claude.expired")) with { Auth = auth };
 
                 // The refresh token is the more valuable of the two and goes to a second,
@@ -106,13 +111,16 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
                 if (!Endpoint.IsSecure(options.TokenUrl))
                     return ProviderResult.Failed(Group, Loc.T("error.claude.insecureUrl", options.TokenUrl)) with { Auth = auth };
 
-                var refreshed = await TryRefreshAsync(creds, deadline.Token).ConfigureAwait(false);
+                var (refreshed, error) = await TryRefreshAsync(creds, deadline.Token).ConfigureAwait(false);
                 if (refreshed is null)
-                    return ProviderResult.Failed(Group, Loc.T("error.claude.refreshFailed")) with { Auth = auth };
+                    return ProviderResult.Failed(Group, error!) with { Auth = auth };
 
                 creds = refreshed;
                 auth = AuthFrom(creds);
             }
+
+            if (refreshOnly)
+                return ProviderResult.Success(Group, []) with { Auth = auth };
 
             using var request = new HttpRequestMessage(HttpMethod.Get, options.UsageUrl);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", creds.AccessToken);
@@ -120,7 +128,7 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
             request.Headers.Add("anthropic-version", "2023-06-01");
             request.Headers.UserAgent.ParseAdd("RateTray/0.1");
 
-            using var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
+            using var response = await _http.SendAsync(request, deadline.Token).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 return ProviderResult.Failed(Group, Loc.T("error.claude.rejected")) with
@@ -151,7 +159,8 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
         }
         catch (OperationCanceledException)
         {
-            return ProviderResult.Failed(Group, Loc.T("error.claude.timeout", options.TimeoutSeconds)) with { Auth = auth };
+            var key = refreshOnly ? "error.claude.refreshTimeout" : "error.claude.timeout";
+            return ProviderResult.Failed(Group, Loc.T(key, options.TimeoutSeconds)) with { Auth = auth };
         }
         catch (Exception ex)
         {
@@ -314,34 +323,35 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
 
     /// <summary>
     /// Exchanges the refresh token and writes the result back, preserving every other field
-    /// in the file so Claude Code keeps working. Returns null on any failure; a cancelled
-    /// <paramref name="ct"/> — shutdown or the poll deadline — is thrown on for the caller
-    /// to tell apart.
+    /// in the file so Claude Code keeps working. Cancellation is passed to the caller.
     /// </summary>
-    private async Task<Credentials?> TryRefreshAsync(Credentials creds, CancellationToken ct)
+    private async Task<(Credentials? Credentials, string? Error)> TryRefreshAsync(Credentials creds, CancellationToken ct)
     {
-        if (creds.RefreshToken is not { Length: > 0 } refreshToken) return null;
+        if (creds.RefreshToken is not { Length: > 0 } refreshToken)
+            return (null, Loc.T("error.claude.refreshNoToken"));
 
         try
         {
-            using var response = await Http.PostAsJsonAsync(options.TokenUrl, new
+            using var response = await _http.PostAsJsonAsync(options.TokenUrl, new
             {
                 grant_type = "refresh_token",
                 refresh_token = refreshToken,
                 client_id = options.ClientId,
             }, ct).ConfigureAwait(false);
 
-            if (!response.IsSuccessStatusCode) return null;
+            if (!response.IsSuccessStatusCode)
+                return (null, Loc.T("error.claude.refreshHttp", (int)response.StatusCode));
 
             var payload = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false))?.AsObject();
-            if (payload?["access_token"]?.GetValue<string>() is not { Length: > 0 } access) return null;
+            if (payload?["access_token"]?.GetValue<string>() is not { Length: > 0 } access)
+                return (null, Loc.T("error.claude.refreshInvalid"));
 
             var newRefresh = payload["refresh_token"]?.GetValue<string>() ?? refreshToken;
             var expiresIn = payload["expires_in"]?.GetValue<long>() ?? 3600;
             var expiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn).ToUnixTimeMilliseconds();
 
             WriteCredentials(access, newRefresh, expiresAt);
-            return new Credentials(access, newRefresh, expiresAt);
+            return (creds with { AccessToken = access, RefreshToken = newRefresh, ExpiresAtUnixMs = expiresAt }, null);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -351,7 +361,7 @@ public sealed class ClaudeUsageProvider(ClaudeOptions options) : IUsageProvider
                                       or IOException or UnauthorizedAccessException
                                       or InvalidOperationException)
         {
-            return null;
+            return (null, Loc.T("error.claude.refreshError", ex.GetType().Name));
         }
     }
 

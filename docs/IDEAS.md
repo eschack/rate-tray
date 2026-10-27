@@ -268,10 +268,10 @@ limit is *projected* to run out before its reset" is a better trigger than a fix
 
 ## Loose ends from 0.1.0
 
-- **`claude.autoRefreshToken` has never been exercised against the live endpoint.** It is off by
-  default and documented as untested in [SECURITY.md](../SECURITY.md). Testing it means
-  deliberately rotating a refresh token, which briefly disturbs the Claude Code sign-in on that
-  machine.
+- **Automatic Claude token refresh at expiry remains unverified.** An on-demand exchange and
+  subsequent usage request succeeded against the live endpoint, but the automatic trigger and
+  concurrent refreshes with Claude Code have not been tested. Refresh tokens may rotate; see
+  [SECURITY.md](../SECURITY.md).
 - **No independent human code review.** See *Provenance* in the README.
 - **The Claude usage endpoint's rate limit is undocumented.** A successful response carries no
   rate-limit headers at all, so there is no way to know the budget in advance. Whether a 429
